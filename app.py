@@ -3,6 +3,8 @@ from flask_cors import CORS  # Import the CORS module
 import tensorflow as tf
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Bidirectional, Dense, Dropout, SpatialDropout1D
 import numpy as np
 import joblib  # Import joblib
 import os
@@ -13,12 +15,32 @@ app = Flask(__name__)
 # Enable CORS for all routes
 CORS(app)  # This will allow cross-origin requests from any domain
 
-# Load trained model
-model_path = "my_model.keras"  # Replace with your model's folder path
-if not os.path.exists(model_path):
-    raise FileNotFoundError(f"Model not found at {model_path}")
+# Define LSTM model architecture
+def build_lstm_model(vocab_size, embedding_dim, max_len, output_classes):
+    model = Sequential()
+    model.add(Embedding(vocab_size, embedding_dim, input_length=max_len))
+    model.add(SpatialDropout1D(0.3))
+    model.add(Bidirectional(LSTM(64, dropout=0.2, recurrent_dropout=0.2, return_sequences=True)))
+    model.add(Bidirectional(LSTM(32, dropout=0.2, recurrent_dropout=0.2)))
+    model.add(Dense(32, activation='relu'))
+    model.add(Dropout(0.3))
+    model.add(Dense(output_classes, activation='softmax'))
+    return model
 
-model = tf.keras.models.load_model(model_path)
+# Initialize model architecture
+vocab_size = 8000  # Adjust according to your tokenizer vocabulary size
+embedding_dim = 128
+max_len = 100  # As per your padding
+output_classes = 3  # Assuming 3 classes for sentiment: negative, neutral, positive
+
+model = build_lstm_model(vocab_size, embedding_dim, max_len, output_classes)
+
+# Load model weights
+weights_path = "model_weights.keras"  # Replace with your weights file path
+if not os.path.exists(weights_path):
+    raise FileNotFoundError(f"Model weights not found at {weights_path}")
+
+model.load_weights(weights_path)
 
 # Load tokenizer
 tokenizer_path = "tokenizer.joblib"  # Use joblib format
@@ -26,9 +48,6 @@ if not os.path.exists(tokenizer_path):
     raise FileNotFoundError(f"Tokenizer not found at {tokenizer_path}")
 
 tokenizer = joblib.load(tokenizer_path)  # Load using joblib
-
-# Tokenizer parameters
-max_len = 100
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -46,7 +65,7 @@ def predict():
 
         # Predict sentiment
         predictions = model.predict(padded_sequences)
-        
+
         # Assuming the model outputs softmax (multi-class), change if needed
         sentiment_labels = ['negative', 'neutral', 'positive']  # Update based on your label encoding
 
@@ -54,7 +73,7 @@ def predict():
         results = [
             {'comment': comment, 'sentiment': sentiment_labels[np.argmax(pred)]}
             for comment, pred in zip(comments, predictions)
-        ] 
+        ]
 
         return jsonify({'predictions': results})
     except Exception as e:
